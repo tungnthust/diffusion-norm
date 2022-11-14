@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from functools import partial
 from torch.nn.parameter import Parameter
 
-NON_NORM_FROM_STEP=0
+NON_NORM_FROM_STEP=1000
 print("NORM::", NON_NORM_FROM_STEP)
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-5, momentum=0.1,

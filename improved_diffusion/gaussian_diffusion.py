@@ -13,7 +13,11 @@ import torch as th
 
 from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
-# from .norm_layer import ReGroupNorm
+
+
+def tanh(x):
+    z = 5 * (x - 0.5)
+    return np.exp(-z) / (np.exp(z) + np.exp(-z))
 
 
 def exponential(x):
@@ -70,6 +74,15 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
             lambda t: exponential(t),
         )
         alphas_cumprod = exponential(np.arange(1, num_diffusion_timesteps + 1) / num_diffusion_timesteps)
+
+        return betas, alphas_cumprod
+    
+    elif schedule_name == "tanh":
+        betas = betas_for_alpha_bar(
+            num_diffusion_timesteps,
+            lambda t: tanh(t),
+        )
+        alphas_cumprod = tanh(np.arange(1, num_diffusion_timesteps + 1) / num_diffusion_timesteps)
 
         return betas, alphas_cumprod
     else:
@@ -519,7 +532,7 @@ class GaussianDiffusion:
         ):
             final = sample["pred_xstart"]
             samples_arr.append(final)
-        output = th.stack(samples_arr)[-end_step::10]
+        output = th.stack(samples_arr)[-end_step:]
         return output
 
     def p_sample_loop_early_stop_test(
