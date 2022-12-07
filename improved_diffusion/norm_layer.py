@@ -172,7 +172,7 @@ class ReGroupNorm(nn.Module):
         mean = input.mean(2)
         var = input.var(2, unbiased=False)
 
-        x = (x - mean[:, :, None]) / (self.r * (torch.sqrt(var[:, :, None]).clamp(min=1)))
+        input = (input - mean[:, :, None]) / (self.r * (torch.sqrt(var[:, :, None]).clamp(min=1)))
 
         input = input.reshape(init_size)
         # if self.affine:
