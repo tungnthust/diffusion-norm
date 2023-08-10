@@ -799,7 +799,7 @@ class GaussianDiffusion:
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
             assert model_output.shape == target.shape == x_start.shape
-            error_direction = get_inner_prod(target, epsilon_t, epsilon_t_1)
+            error_direction = self.get_inner_prod(target, epsilon_t, epsilon_t_1)
             terms["mse"] = mean_flat((target - epsilon_t) ** 2) + 1.5 * mean_flat((target - epsilon_t_1) ** 2) + 0.5 * mean_flat((error_direction - 1) ** 2)
 
             if "vb" in terms:
