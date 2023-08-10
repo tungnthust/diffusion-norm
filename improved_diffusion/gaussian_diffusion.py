@@ -808,7 +808,7 @@ class GaussianDiffusion:
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:
-                terms["loss"] = terms["mse"] + 0.5 * terms["direction"]
+                terms["loss"] = terms["mse_t"]
         else:
             raise NotImplementedError(self.loss_type)
 
