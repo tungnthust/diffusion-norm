@@ -15,6 +15,23 @@ from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 
 
+def tanh(x):
+    z = 5 * (x - 0.5)
+    return np.exp(-z) / (np.exp(z) + np.exp(-z))
+
+
+def exponential(x):
+    return 1 - np.exp(6 * (x - 1 - 1e-5))
+
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
+def get_alphas_cumprod_from_betas(betas):
+    return np.cumprod(1.0 - betas, axis=0)
+
+
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
     Get a pre-defined beta schedule for the given name.
@@ -30,14 +47,44 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
         scale = 1000 / num_diffusion_timesteps
         beta_start = scale * 0.0001
         beta_end = scale * 0.02
-        return np.linspace(
+        betas = np.linspace(
             beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
         )
+        return betas, get_alphas_cumprod_from_betas(betas)
+
     elif schedule_name == "cosine":
-        return betas_for_alpha_bar(
+        betas = betas_for_alpha_bar(
             num_diffusion_timesteps,
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
         )
+
+        return betas, get_alphas_cumprod_from_betas(betas)
+
+    elif schedule_name == "sigmoid":
+        betas = betas_for_alpha_bar(
+            num_diffusion_timesteps,
+            lambda t: sigmoid(10*(0.5 - t)),
+        )
+
+        return betas, get_alphas_cumprod_from_betas(betas)
+
+    elif schedule_name == "exponential":
+        betas = betas_for_alpha_bar(
+            num_diffusion_timesteps,
+            lambda t: exponential(t),
+        )
+        alphas_cumprod = exponential(np.arange(1, num_diffusion_timesteps + 1) / num_diffusion_timesteps)
+
+        return betas, alphas_cumprod
+    
+    elif schedule_name == "tanh":
+        betas = betas_for_alpha_bar(
+            num_diffusion_timesteps,
+            lambda t: tanh(t),
+        )
+        alphas_cumprod = tanh(np.arange(1, num_diffusion_timesteps + 1) / num_diffusion_timesteps)
+
+        return betas, alphas_cumprod
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
 
@@ -119,6 +166,7 @@ class GaussianDiffusion:
         self,
         *,
         betas,
+        alphas_cumprod,
         model_mean_type,
         model_var_type,
         loss_type,
@@ -138,7 +186,7 @@ class GaussianDiffusion:
         self.num_timesteps = int(betas.shape[0])
 
         alphas = 1.0 - betas
-        self.alphas_cumprod = np.cumprod(alphas, axis=0)
+        self.alphas_cumprod = alphas_cumprod
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
         assert self.alphas_cumprod_prev.shape == (self.num_timesteps,)
