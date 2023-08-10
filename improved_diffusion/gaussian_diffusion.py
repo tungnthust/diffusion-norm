@@ -800,12 +800,12 @@ class GaussianDiffusion:
             }[self.model_mean_type]
             assert model_output.shape == target.shape == x_start.shape
             error_direction = self.get_inner_prod(target, epsilon_t, epsilon_t_1)
-            terms["mse"] = mean_flat((target - epsilon_t) ** 2) + 1.5 * mean_flat((target - epsilon_t_1) ** 2) + 0.5 * mean_flat((error_direction - 1) ** 2)
-
+            terms["mse"] = mean_flat((target - epsilon_t) ** 2) + 1.5 * mean_flat((target - epsilon_t_1) ** 2)
+            terms["direction"] = mean_flat((error_direction - 1) ** 2)
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:
-                terms["loss"] = terms["mse"]
+                terms["loss"] = terms["mse"] + 0.5 * terms["direction"]
         else:
             raise NotImplementedError(self.loss_type)
 
