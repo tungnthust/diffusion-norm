@@ -680,7 +680,9 @@ class GaussianDiffusion:
         # epsilon_t_1 = epsilon_t_1.reshape(epsilon_t_1.shape[0], -1)
         mse_t = epsilon - epsilon_t
         mse_t_1 = epsilon - epsilon_t_1
-        return th.mul(mse_t, mse_t_1).sum(dim=(1, 2, 3))
+        norm_mse_t = th.square(mse_t).sum(dim=(1, 2, 3))
+        norm_mse_t_1 = th.square(mse_t_1).sum(dim=(1, 2, 3))
+        return th.mul(mse_t, mse_t_1).sum(dim=(1, 2, 3)) / th.sqrt(norm_mse_t * norm_mse_t_1)
 
     def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
         """
