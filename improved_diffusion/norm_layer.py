@@ -4,8 +4,6 @@ import torch.nn.functional as F
 from functools import partial
 from torch.nn.parameter import Parameter
 
-NON_NORM_FROM_STEP=1000
-print("NORM::", NON_NORM_FROM_STEP)
 class BatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, eps=1e-5, momentum=0.1,
                  affine=True, track_running_stats=True):
@@ -142,7 +140,7 @@ class GroupNorm(nn.GroupNorm):
 
 
 class ReGroupNorm(nn.Module):
-    def __init__(self, num_channels, group_size=3, r=1., affine=True):
+    def __init__(self, num_channels, norm_from_step=1000, group_size=3, r=1., affine=True):
         self.num_groups = num_channels // group_size
         super(ReGroupNorm, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -150,7 +148,7 @@ class ReGroupNorm(nn.Module):
         self.affine = affine
         self.r = r
         self.group_size = group_size
-
+        self.norm_from_step = norm_from_step
         # if self.affine:
         #     self.weight = Parameter(torch.ones(num_channels, device=self.device))
         #     self.bias = Parameter(torch.zeros(num_channels, device=self.device))
@@ -160,7 +158,7 @@ class ReGroupNorm(nn.Module):
 
     def forward(self, x_t, t):
         x = torch.clone(x_t)
-        norm_mask = t >= NON_NORM_FROM_STEP
+        norm_mask = t >= self.norm_from_step
         if not any(norm_mask):
             return x
         input = x[norm_mask]

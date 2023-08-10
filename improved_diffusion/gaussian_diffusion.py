@@ -15,23 +15,6 @@ from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 
 
-def tanh(x):
-    z = 5 * (x - 0.5)
-    return np.exp(-z) / (np.exp(z) + np.exp(-z))
-
-
-def exponential(x):
-    return 1 - np.exp(6 * (x - 1 - 1e-5))
-
-
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
-
-
-def get_alphas_cumprod_from_betas(betas):
-    return np.cumprod(1.0 - betas, axis=0)
-
-
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
     Get a pre-defined beta schedule for the given name.
@@ -47,44 +30,14 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
         scale = 1000 / num_diffusion_timesteps
         beta_start = scale * 0.0001
         beta_end = scale * 0.02
-        betas = np.linspace(
+        return np.linspace(
             beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
         )
-        return betas, get_alphas_cumprod_from_betas(betas)
-
     elif schedule_name == "cosine":
-        betas = betas_for_alpha_bar(
+        return betas_for_alpha_bar(
             num_diffusion_timesteps,
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
         )
-
-        return betas, get_alphas_cumprod_from_betas(betas)
-
-    elif schedule_name == "sigmoid":
-        betas = betas_for_alpha_bar(
-            num_diffusion_timesteps,
-            lambda t: sigmoid(10*(0.5 - t)),
-        )
-
-        return betas, get_alphas_cumprod_from_betas(betas)
-
-    elif schedule_name == "exponential":
-        betas = betas_for_alpha_bar(
-            num_diffusion_timesteps,
-            lambda t: exponential(t),
-        )
-        alphas_cumprod = exponential(np.arange(1, num_diffusion_timesteps + 1) / num_diffusion_timesteps)
-
-        return betas, alphas_cumprod
-    
-    elif schedule_name == "tanh":
-        betas = betas_for_alpha_bar(
-            num_diffusion_timesteps,
-            lambda t: tanh(t),
-        )
-        alphas_cumprod = tanh(np.arange(1, num_diffusion_timesteps + 1) / num_diffusion_timesteps)
-
-        return betas, alphas_cumprod
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
 
@@ -166,7 +119,6 @@ class GaussianDiffusion:
         self,
         *,
         betas,
-        alphas_cumprod,
         model_mean_type,
         model_var_type,
         loss_type,
@@ -186,7 +138,7 @@ class GaussianDiffusion:
         self.num_timesteps = int(betas.shape[0])
 
         alphas = 1.0 - betas
-        self.alphas_cumprod = alphas_cumprod
+        self.alphas_cumprod = np.cumprod(alphas, axis=0)
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
         assert self.alphas_cumprod_prev.shape == (self.num_timesteps,)
@@ -305,8 +257,8 @@ class GaussianDiffusion:
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        # a = th.tensor([49] * B, device='cuda:0')
         model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -378,7 +330,7 @@ class GaussianDiffusion:
         return (
             _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
             - _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * eps
-          )
+        )
 
     def _predict_xstart_from_xprev(self, x_t, t, xprev):
         assert x_t.shape == xprev.shape
@@ -400,16 +352,6 @@ class GaussianDiffusion:
         if self.rescale_timesteps:
             return t.float() * (1000.0 / self.num_timesteps)
         return t
-
-
-    def rescaled_variance(self, t, shape):
-        output = (_extract_into_tensor(np.sqrt(self.alphas_cumprod_next), t, shape)) \
-                         * (1 - _extract_into_tensor(self.alphas_cumprod, t, shape)) \
-                        / _extract_into_tensor(np.sqrt(1.0 - self.alphas_cumprod_next), t, shape) \
-        + _extract_into_tensor(np.append(self.betas[1:], self.betas[-1]), t, shape)
-
-
-        return output
 
     def p_sample(
         self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
@@ -486,106 +428,6 @@ class GaussianDiffusion:
             final = sample
         return final["sample"]
 
-    def p_sample_loop_early_stop(
-        self,
-        model,
-        shape,
-        noise=None,
-        clip_denoised=True,
-        denoised_fn=None,
-        model_kwargs=None,
-        device=None,
-        progress=False,
-        end_step=1
-    ):
-        """
-        Generate samples from the model in early-stop mode.
-        Final sample is `pred_xstart` output generated from sample at specified `end-step`
-
-        :param model: the model module.
-        :param shape: the shape of the samples, (N, C, H, W).
-        :param noise: if specified, the noise from the encoder to sample.
-                      Should be of the same shape as `shape`.
-        :param clip_denoised: if True, clip x_start predictions to [-1, 1].
-        :param denoised_fn: if not None, a function which applies to the
-            x_start prediction before it is used to sample.
-        :param model_kwargs: if not None, a dict of extra keyword arguments to
-            pass to the model. This can be used for conditioning.
-        :param device: if specified, the device to create the samples on.
-                       If not specified, use a model parameter's device.
-        :param progress: if True, show a tqdm progress bar.
-        :param end_step: the step where sampling process stops
-        :return: list of samples at each step, which behind `end_step`
-                 (`end_step`, B, C, H, W)
-        """
-        final = None
-        samples_arr = []
-        for sample in self.p_sample_loop_progressive(
-            model,
-            shape,
-            noise=noise,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            model_kwargs=model_kwargs,
-            device=device,
-            progress=progress,
-        ):
-            final = sample["pred_xstart"]
-            samples_arr.append(final)
-        output = th.stack(samples_arr)[-end_step:]
-        return output
-
-    def p_sample_loop_early_stop_test(
-        self,
-        model,
-        x_start,
-        shape,
-        noise=None,
-        clip_denoised=True,
-        denoised_fn=None,
-        model_kwargs=None,
-        device=None,
-        progress=False,
-        end_step=1
-    ):
-        """
-        Generate samples from the model in early-stop mode.
-        Final sample is `pred_xstart` output generated from sample at specified `end-step`
-
-        :param model: the model module.
-        :param shape: the shape of the samples, (N, C, H, W).
-        :param noise: if specified, the noise from the encoder to sample.
-                      Should be of the same shape as `shape`.
-        :param clip_denoised: if True, clip x_start predictions to [-1, 1].
-        :param denoised_fn: if not None, a function which applies to the
-            x_start prediction before it is used to sample.
-        :param model_kwargs: if not None, a dict of extra keyword arguments to
-            pass to the model. This can be used for conditioning.
-        :param device: if specified, the device to create the samples on.
-                       If not specified, use a model parameter's device.
-        :param progress: if True, show a tqdm progress bar.
-        :param end_step: the step where sampling process stops
-        :return: list of samples at each step, which behind `end_step`
-                 (`end_step`, B, C, H, W)
-        """
-        final = None
-        samples_arr = []
-        for sample in self.p_sample_loop_progressive_test(
-            model,
-            x_start,
-            shape,
-            noise=noise,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            model_kwargs=model_kwargs,
-            device=device,
-            progress=progress,
-        ):
-            final = sample["pred_xstart"]
-            samples_arr.append(final)
-        output = th.stack(samples_arr)[[99, 90, 80, 70, 60, 50, 40, 30, 25, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]]
-        return output
-
     def p_sample_loop_progressive(
         self,
         model,
@@ -622,59 +464,6 @@ class GaussianDiffusion:
 
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
-            with th.no_grad():
-                out = self.p_sample(
-                    model,
-                    img,
-                    t,
-                    clip_denoised=clip_denoised,
-                    denoised_fn=denoised_fn,
-                    model_kwargs=model_kwargs,
-                )
-                yield out
-                img = out["sample"]
-
-    def p_sample_loop_progressive_test(
-        self,
-        model,
-        x_start,
-        shape,
-        noise=None,
-        clip_denoised=True,
-        denoised_fn=None,
-        model_kwargs=None,
-        device=None,
-        progress=False,
-    ):
-        """
-        Generate samples from the model and yield intermediate samples from
-        each timestep of diffusion.
-
-        Arguments are the same as p_sample_loop().
-        Returns a generator over dicts, where each dict is the return value of
-        p_sample().
-        """
-        if device is None:
-            device = next(model.parameters()).device
-        assert isinstance(shape, (tuple, list))
-        if noise is not None:
-            img = noise
-        else:
-            img = th.randn(*shape, device=device)
-        indices = list(range(self.num_timesteps))[::-1]
-
-        if progress:
-            # Lazy import so that we don't depend on tqdm.
-            from tqdm.auto import tqdm
-
-            indices = tqdm(indices)
-
-        for i in indices:
-            t = th.tensor([i] * shape[0], device=device)
-            if i > 100:
-                continue
-            if i == 100:
-                img = self.q_sample(x_start, t)
             with th.no_grad():
                 out = self.p_sample(
                     model,
@@ -885,6 +674,14 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
+    def get_inner_prod(epsilon, epsilon_t, epsilon_t_1):
+        # epsilon = epsilon.reshape(epsilon.shape[0], -1)
+        # epsilon_t = epsilon_t.reshape(epsilon_t.shape[0], -1)
+        # epsilon_t_1 = epsilon_t_1.reshape(epsilon_t_1.shape[0], -1)
+        mse_t = epsilon - epsilon_t
+        mse_t_1 = epsilon - epsilon_t_1
+        return th.mul(mse_t, mse_t_1).sum(dim=(1, 2, 3))
+
     def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
         """
         Compute training losses for a single timestep.
@@ -903,7 +700,7 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(x_start)
         x_t = self.q_sample(x_start, t, noise=noise)
-
+        x_t_1 = self.q_sample(x_start, t - 1.0, noise=noise)
         terms = {}
 
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
@@ -919,6 +716,8 @@ class GaussianDiffusion:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
+            epsilon_t = model_output
+            epsilon_t_1 = model(x_t_1, self._scale_timesteps(t - 1.0), **model_kwargs)
 
             if self.model_var_type in [
                 ModelVarType.LEARNED,
@@ -950,7 +749,9 @@ class GaussianDiffusion:
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
             assert model_output.shape == target.shape == x_start.shape
-            terms["mse"] = mean_flat((target - model_output) ** 2)
+            error_direction = get_inner_prod(target, epsilon_t, epsilon_t_1)
+            terms["mse"] = mean_flat((target - epsilon_t) ** 2) + 1.5 * mean_flat((target - epsilon_t_1) ** 2) + 0.5 * mean_flat((error_direction - 1) ** 2)
+
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:
@@ -959,7 +760,7 @@ class GaussianDiffusion:
             raise NotImplementedError(self.loss_type)
 
         return terms
-
+    
     def _prior_bpd(self, x_start):
         """
         Get the prior KL term for the variational lower-bound, measured in

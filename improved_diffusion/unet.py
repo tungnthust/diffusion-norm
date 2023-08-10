@@ -438,7 +438,7 @@ class UNetModel(nn.Module):
             zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
         )
 
-        self.norm = ReGroupNorm(out_channels)
+        # self.norm = ReGroupNorm(out_channels)
 
     def convert_to_fp16(self):
         """
@@ -485,7 +485,7 @@ class UNetModel(nn.Module):
 
         h = x.type(self.inner_dtype)
 
-        h = self.norm(h, timesteps)
+        # h = self.norm(h, timesteps)
 
         for module in self.input_blocks:
             h = module(h, emb)
