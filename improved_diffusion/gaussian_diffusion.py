@@ -722,7 +722,7 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def get_inner_prod(epsilon, epsilon_t, epsilon_t_1):
+    def get_inner_prod(self, epsilon, epsilon_t, epsilon_t_1):
         # epsilon = epsilon.reshape(epsilon.shape[0], -1)
         # epsilon_t = epsilon_t.reshape(epsilon_t.shape[0], -1)
         # epsilon_t_1 = epsilon_t_1.reshape(epsilon_t_1.shape[0], -1)
